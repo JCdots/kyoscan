@@ -2,6 +2,7 @@ import win32print
 import requests
 import re
 import urllib3
+import concurrent.futures
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -26,32 +27,23 @@ def get_printers_from_server(server_ip):
             1
         )
 
-        for printer_info in printers:
-            print(printer_info)
-            # Handle potential tuple vs dict return (robustness from main.py)
-            if isinstance(printer_info, tuple):
-                # Level 1 tuple: (Flags, Description, Name, Comment)
-                flags, description, name, comment = printer_info
-            else:
-                name = printer_info.get('pPrinterName', '')
-                comment = printer_info.get('pComment', '')
-
+        # Optimize loop by unpacking the tuple directly: (Flags, Description, Name, Comment)
+        for flags, description, name, comment in printers:
             # Clean up name (remove \\Server\)
-            if '\\' in name:
-                name = name.split('\\')[-1]
+            if name and '\\' in name:
+                clean_name = name.split('\\')[-1]
+            else:
+                clean_name = name
             
             if comment:
                 # Search for the first IP address in the comment string
                 match = ip_pattern.search(comment)
                 if match:
-                    ip_address = match.group(0)
-                    printer_dict[name] = ip_address
+                    printer_dict[clean_name] = match.group(0)
                 else:
-                    # Handle cases where comment exists but has no IP
-                    printer_dict[name] = None
+                    printer_dict[clean_name] = None
             else:
-                # Handle cases with no comment
-                printer_dict[name] = None
+                printer_dict[clean_name] = None
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -64,7 +56,6 @@ def get_printer_hostname(ip_address):
     
     headers = {
         "Referer": f"https://{ip_address}/startwlm/Start_Wlm.htm",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
         "Cookie": "rtl=0; css=1"
     }
     
@@ -76,17 +67,16 @@ def get_printer_hostname(ip_address):
         if match:
             return match.group(1)
         else:
-            return "Hostname not found"
+            return None
             
     except Exception as e:
-        return f"Error fetching hostname: {e}"
+        return None
 
 def get_printer_toner_level(ip_address):
     url = f"https://{ip_address}/js/jssrc/model/startwlm/Hme_Toner.model.htm"
     
     headers = {
-        "Referer": f"https://{ip_address}/startwlm/Hme_Toner.htm", 
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+        "Referer": f"https://{ip_address}/startwlm/Hme_Toner.htm",
         "Cookie": "rtl=0; css=1"
     }
     
@@ -99,23 +89,86 @@ def get_printer_toner_level(ip_address):
         if matches:
             return int(matches[0])
         else:
-            return "Toner level not found"
+            return None
 
     except Exception as e:
-        return f"Error fetching toner: {e}"
+        return None
+
+def sort_printers_by_ip(printer_dict):
+    """
+    Sorts the printer dictionary by IP address.
+    Printers with no IP are placed at the end.
+    """
+    def ip_sort_key(item):
+        ip = item[1]
+        if ip:
+            try:
+                # Convert IP string "192.168.1.1" to tuple (192, 168, 1, 1) for proper numeric sorting
+                return tuple(map(int, ip.split('.')))
+            except ValueError:
+                pass
+        # Return a tuple that ensures these come last
+        return (float('inf'),)
+
+    return dict(sorted(printer_dict.items(), key=ip_sort_key))
+
+def fetch_printer_details(name, ip):
+    """Helper to fetch details for a single printer safely."""
+    if not ip:
+        return {'Name': name, 'IP': None, 'Hostname': "N/A", 'Toner': "N/A"}
     
+    # Fetch data
+    hostname = get_printer_hostname(ip)
+    toner = get_printer_toner_level(ip)
+    
+    return {'Name': name, 'IP': ip, 'Hostname': hostname, 'Toner': toner}
+
+def get_all_printers_data(printer_dict, max_workers=50):
+    """
+    Fetches hostname and toner level for all printers concurrently.
+    """
+    results = []
+    print(f"Starting concurrent fetch for {len(printer_dict)} printers with {max_workers} workers...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit tasks
+        future_to_printer = {
+            executor.submit(fetch_printer_details, name, ip): name 
+            for name, ip in printer_dict.items()
+        }
+        
+        # Collect results
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_printer)):
+            try:
+                data = future.result()
+                results.append(data)
+                if (i + 1) % 10 == 0:
+                    print(f"Progress: {i + 1}/{len(printer_dict)}")
+            except Exception as exc:
+                print(f"Task generated an exception: {exc}")
+                
+    return results
+
+
 if __name__ == "__main__":
-    ip = "192.168.11.253"
     server_ip = "10.3.3.10"
 
+    # 1. Get printers from server
     printers = get_printers_from_server(server_ip)
+
+    if printers:
+        # 2. Fetch details concurrently
+        all_data = get_all_printers_data(printers)
+        sorted_data = sorted(all_data, key=lambda x: (tuple(map(int, x['IP'].split('.'))) if x['IP'] else (float('inf'),)))
+        # 3. Print results
+        for data in sorted_data:
+            print(f"Printer Name: {data['Name']}, IP: {data['IP']}, Hostname: {f'{data['Hostname']}' if data['Hostname'] is not None else 'N/A'}, Toner Level: {f'{data['Toner']}%' if data['Toner'] is not None else 'N/A'}")
+
+    # printers = get_printers_from_server(server_ip)
+    # sorted_printers = sort_printers_by_ip(printers)
+
     # print("Printers and their IPs:")
-    # for name, ip_addr in printers.items():
+    # for name, ip_addr in sorted_printers.items():
     #     print(f"{name}: {ip_addr}")
 
     # print("Total printers found:", len(printers))
-
-    hostname = get_printer_hostname(ip)
-    toner_level = get_printer_toner_level(ip)
-    print(f"Printer Hostname: {hostname}")
-    print(f"Toner Level: {toner_level}%")
