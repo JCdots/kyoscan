@@ -59,17 +59,13 @@ def get_printer_hostname(ip_address):
         "Cookie": "rtl=0; css=1"
     }
     
-    try:
-        response = requests.get(url, headers=headers, verify=False, timeout=10)
-        response.raise_for_status()
-        
-        match = re.search(r"_pp\.f_getHostName\s*=\s*'([^']*)';", response.text)
-        if match:
-            return match.group(1)
-        else:
-            return None
-            
-    except Exception as e:
+    response = requests.get(url, headers=headers, verify=False, timeout=10)
+    response.raise_for_status()
+
+    match = re.search(r"_pp\.f_getHostName\s*=\s*'([^']*)';", response.text)
+    if match:
+        return match.group(1)
+    else:
         return None
 
 def get_printer_toner_level(ip_address):
@@ -80,18 +76,14 @@ def get_printer_toner_level(ip_address):
         "Cookie": "rtl=0; css=1"
     }
     
-    try:
-        response = requests.get(url, headers=headers, verify=False, timeout=10)
-        response.raise_for_status()
-        
-        matches = re.findall(r"_pp\.Renaming\.push\(parseInt\('(\d+)',\s*10\)\);", response.text)
-        
-        if matches:
-            return int(matches[0])
-        else:
-            return None
+    response = requests.get(url, headers=headers, verify=False, timeout=10)
+    response.raise_for_status()
 
-    except Exception as e:
+    matches = re.findall(r"_pp\.Renaming\.push\(parseInt\('(\d+)',\s*10\)\);", response.text)
+
+    if matches:
+        return int(matches[0])
+    else:
         return None
 
 def sort_printers_by_ip(printer_dict):
@@ -115,13 +107,28 @@ def sort_printers_by_ip(printer_dict):
 def fetch_printer_details(name, ip):
     """Helper to fetch details for a single printer safely."""
     if not ip:
-        return {'Name': name, 'IP': None, 'Hostname': "N/A", 'Toner': "N/A"}
+        return {'Name': name, 'IP': None, 'Hostname': "N/A", 'Toner': "N/A", 'Status': "Offline"}
     
+    hostname = None
+    toner = None
+    is_online = False
+
     # Fetch data
-    hostname = get_printer_hostname(ip)
-    toner = get_printer_toner_level(ip)
+    try:
+        hostname = get_printer_hostname(ip)
+        is_online = True
+    except Exception:
+        hostname = None
+
+    try:
+        toner = get_printer_toner_level(ip)
+        is_online = True
+    except Exception:
+        toner = None
+
+    status = "Online" if is_online else "Offline"
     
-    return {'Name': name, 'IP': ip, 'Hostname': hostname, 'Toner': toner}
+    return {'Name': name, 'IP': ip, 'Hostname': hostname, 'Toner': toner, 'Status': status}
 
 def get_all_printers_data(printer_dict, max_workers=50):
     """
@@ -162,7 +169,7 @@ if __name__ == "__main__":
         sorted_data = sorted(all_data, key=lambda x: (tuple(map(int, x['IP'].split('.'))) if x['IP'] else (float('inf'),)))
         # 3. Print results
         for data in sorted_data:
-            print(f"Printer Name: {data['Name']}, IP: {data['IP']}, Hostname: {f'{data['Hostname']}' if data['Hostname'] is not None else 'N/A'}, Toner Level: {f'{data['Toner']}%' if data['Toner'] is not None else 'N/A'}")
+            print(f"Printer Name: {data['Name']}, IP: {data['IP']}, Hostname: {f'{data['Hostname']}' if data['Hostname'] is not None else 'N/A'}, Toner Level: {f'{data['Toner']}%' if data['Toner'] is not None else 'N/A'}, Status: {data['Status']}")
 
     # printers = get_printers_from_server(server_ip)
     # sorted_printers = sort_printers_by_ip(printers)
