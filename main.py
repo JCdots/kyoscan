@@ -51,22 +51,32 @@ def get_printers_from_server(server_ip):
 
     return printer_dict
 
-def get_printer_hostname(ip_address):
-    url = f"https://{ip_address}/js/jssrc/model/startwlm/Start_Wlm.model.htm"
+def get_printer_info(ip_address):
+    url = f"https://{ip_address}/js/jssrc/model/dvcinfo/dvcconfig/DvcConfig_Config.model.htm?arg1=0"
     
     headers = {
-        "Referer": f"https://{ip_address}/startwlm/Start_Wlm.htm",
+        "Referer": f"https://{ip_address}/dvcinfo/dvcconfig/DvcConfig_Config.htm?arg1=0",
         "Cookie": "rtl=0; css=1"
     }
     
     response = requests.get(url, headers=headers, verify=False, timeout=10)
     response.raise_for_status()
 
-    match = re.search(r"_pp\.f_getHostName\s*=\s*'([^']*)';", response.text)
-    if match:
-        return match.group(1)
-    else:
-        return None
+    info = {}
+    patterns = {
+        "hostname": r"_pp\.hostName\s*=\s*'([^']*)';",
+        "serial": r"_pp\.serialNumber\s*=\s*'([^']*)';",
+        "mac": r"_pp\.macAddress\s*=\s*'([^']*)';"
+    }
+
+    for key, pattern in patterns.items():
+        match = re.search(pattern, response.text)
+        if match:
+            info[key] = match.group(1)
+        else:
+            info[key] = None
+
+    return info
 
 def get_printer_toner_level(ip_address):
     url = f"https://{ip_address}/js/jssrc/model/startwlm/Hme_Toner.model.htm"
@@ -85,6 +95,60 @@ def get_printer_toner_level(ip_address):
         return int(matches[0])
     else:
         return None
+
+def get_printer_print_data(ip_address):
+    url = f"https://{ip_address}/js/jssrc/model/dvcinfo/dvccounter/DvcInfo_Counter_PrnCounter.model.htm"
+
+    headers = {
+        "Referer": f"https://{ip_address}/dvcinfo/dvccounter/DvcInfo_Counter_PrnCounter.htm",
+        "Cookie": "rtl=0; css=1"
+    }
+
+    response = requests.get(url, headers=headers, verify=False, timeout=10)
+    response.raise_for_status()
+
+    data = {}
+    patterns = {
+        "copy_bw": r"_pp\.copyBlackWhite\s*=\s*\('(\d+)'\)\.toString\(\);",
+        "printer_bw": r"_pp\.printerBlackWhite\s*=\s*\('(\d+)'\)\.toString\(\);",
+        "fax_bw": r"_pp\.faxBlackWhite\s*=\s*\('(\d+)'\)\.toString\(\);"
+    }
+
+    for key, pattern in patterns.items():
+        match = re.search(pattern, response.text)
+        if match:
+            data[key] = int(match.group(1))
+        else:
+            data[key] = None
+
+    return data
+
+def get_printer_scan_data(ip_address):
+    url = f"https://{ip_address}/js/jssrc/model/dvcinfo/dvccounter/DvcInfo_Counter_ScanCounter.model.htm"
+
+    headers = {
+        "Referer": f"https://{ip_address}/dvcinfo/dvccounter/DvcInfo_Counter_ScanCounter.htm",
+        "Cookie": "rtl=0; css=1"
+    }
+
+    response = requests.get(url, headers=headers, verify=False, timeout=10)
+    response.raise_for_status()
+
+    data = {}
+    patterns = {
+        "scan_copy": r"_pp\.scanCopy\s*=\s*parseInt\('(\d+)',\s*10\);",
+        "scan_bw": r"_pp\.scanBlackWhite\s*=\s*parseInt\('(\d+)',\s*10\);",
+        "scan_other": r"_pp\.scanOther\s*=\s*parseInt\('(\d+)',\s*10\);"
+    }
+
+    for key, pattern in patterns.items():
+        match = re.search(pattern, response.text)
+        if match:
+            data[key] = int(match.group(1))
+        else:
+            data[key] = None
+
+    return data
 
 def sort_printers_by_ip(printer_dict):
     """
@@ -107,18 +171,23 @@ def sort_printers_by_ip(printer_dict):
 def fetch_printer_details(name, ip):
     """Helper to fetch details for a single printer safely."""
     if not ip:
-        return {'Name': name, 'IP': None, 'Hostname': "N/A", 'Toner': "N/A", 'Status': "Offline"}
+        return {'Name': name, 'IP': None, 'Hostname': "N/A", 'Serial': None, 'Mac': None, 'Toner': "N/A", 'Status': "Offline"}
     
     hostname = None
+    serial = None
+    mac = None
     toner = None
     is_online = False
 
     # Fetch data
     try:
-        hostname = get_printer_hostname(ip)
+        info = get_printer_info(ip)
+        hostname = info.get('hostname')
+        serial = info.get('serial')
+        mac = info.get('mac')
         is_online = True
     except Exception:
-        hostname = None
+        pass
 
     try:
         toner = get_printer_toner_level(ip)
@@ -126,9 +195,21 @@ def fetch_printer_details(name, ip):
     except Exception:
         toner = None
 
+    try:
+        print_data = get_printer_print_data(ip)
+        is_online = True
+    except Exception:
+        print_data = None
+    
+    try:
+        scan_data = get_printer_scan_data(ip)
+        is_online = True
+    except Exception:
+        scan_data = None
+
     status = "Online" if is_online else "Offline"
     
-    return {'Name': name, 'IP': ip, 'Hostname': hostname, 'Toner': toner, 'Status': status}
+    return {'Name': name, 'IP': ip, 'Hostname': hostname, 'Serial': serial, 'Mac': mac, 'Toner': toner, 'Print_Data': print_data, 'Scan_Data': scan_data, 'Status': status}
 
 def get_all_printers_data(printer_dict, max_workers=50):
     """
@@ -150,7 +231,7 @@ def get_all_printers_data(printer_dict, max_workers=50):
                 data = future.result()
                 results.append(data)
                 if (i + 1) % 10 == 0:
-                    print(f"Progress: {i + 1}/{len(printer_dict)}")
+                    print(f"Progress: {i + 1}/{len(printer_dict)}", end='\r')
             except Exception as exc:
                 print(f"Task generated an exception: {exc}")
                 
@@ -169,13 +250,4 @@ if __name__ == "__main__":
         sorted_data = sorted(all_data, key=lambda x: (tuple(map(int, x['IP'].split('.'))) if x['IP'] else (float('inf'),)))
         # 3. Print results
         for data in sorted_data:
-            print(f"Printer Name: {data['Name']}, IP: {data['IP']}, Hostname: {f'{data['Hostname']}' if data['Hostname'] is not None else 'N/A'}, Toner Level: {f'{data['Toner']}%' if data['Toner'] is not None else 'N/A'}, Status: {data['Status']}")
-
-    # printers = get_printers_from_server(server_ip)
-    # sorted_printers = sort_printers_by_ip(printers)
-
-    # print("Printers and their IPs:")
-    # for name, ip_addr in sorted_printers.items():
-    #     print(f"{name}: {ip_addr}")
-
-    # print("Total printers found:", len(printers))
+            print(f"Printer Name: {data['Name']}, IP: {data['IP']}, Hostname: {f'{data['Hostname']}' if data['Hostname'] is not None else 'N/A'}, Serial: {f'{data['Serial']}' if data['Serial'] is not None else 'N/A'}, Mac: {f'{data['Mac']}' if data['Mac'] is not None else 'N/A'}, Toner Level: {f'{data['Toner']}%' if data['Toner'] is not None else 'N/A'}, Print Data: {data['Print_Data'] if data['Print_Data'] is not None else 'N/A'}, Scan Data: {data['Scan_Data'] if data['Scan_Data'] is not None else 'N/A'}, Status: {data['Status']}")
