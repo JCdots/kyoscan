@@ -10,7 +10,6 @@ def get_printers_from_server(server_ip: str) -> Optional[Dict[str, Optional[str]
     ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 
     try:
-        print(f"Connecting to Print Spooler on {server_ip}...")
         printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_NAME, f'\\\\{server_ip}', 1)
 
         for flags, description, name, comment in printers:
@@ -99,7 +98,6 @@ async def fetch_printer_details(client: httpx.AsyncClient, name: str, ip: Option
 
 async def get_all_printers_data_async(printer_dict: Dict[str, Optional[str]], max_concurrent: int = 20) -> List[Dict[str, Any]]:
     """Fetch data for all printers concurrently."""
-    print(f"Starting async fetch for {len(printer_dict)} printers...")
     
     semaphore = asyncio.Semaphore(max_concurrent)
     limits = httpx.Limits(max_keepalive_connections=max_concurrent, max_connections=max_concurrent)
@@ -115,9 +113,8 @@ async def get_all_printers_data_async(printer_dict: Dict[str, Optional[str]], ma
             result = await task
             results.append(result)
             if (i + 1) % 10 == 0 or (i + 1) == total:
-                print(f"Progress: {i + 1}/{total} printers processed", end='\r')
+                print(f"Progress: {i + 1}/{total} printers processed.", end='\r')
         
-        print(f"\nCompleted fetching data for {total} printers.")
         return results
 
 async def main() -> None:

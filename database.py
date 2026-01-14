@@ -4,14 +4,6 @@ from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from config import Config
 
-def extract_serial_suffix(text: Optional[str]) -> Optional[str]:
-    """Extract the last 6+ digits from text for heuristic matching."""
-
-    if not text:
-        return None
-    match = re.search(r'(\d{6,})$', text)
-    return match.group(1) if match else None
-
 class Database:
     def __init__(self, config: Config):
         self.config = config.get_db_config()
@@ -104,17 +96,6 @@ class Database:
 
             if result_row:
                 device_db_id = result_row[0]
-            else:
-                suffix = extract_serial_suffix(name) or extract_serial_suffix(hostname)
-                if suffix:
-                    cursor.execute("""
-                                    SELECT id
-                                    FROM devices
-                                    WHERE serial_number LIKE %s
-                                    """, (f"%{suffix}",))
-                    result_row = cursor.fetchone()
-                    if result_row:
-                        device_db_id = result_row[0]
                 
         return device_db_id
     
@@ -154,8 +135,10 @@ class Database:
         elif bool(ip) != bool(last_ip): # One is None, the other isn't
             ip_changed = True
 
-        return (name != last_name) or ip_changed or \
-               (hostname != last_hostname) or (mac != last_mac)
+        hostname_changed = (hostname is not None and hostname != last_hostname)
+        mac_changed = (mac is not None and mac != last_mac)
+
+        return (name != last_name) or ip_changed or hostname_changed or mac_changed
     
     def save_printer_data(self, data_list: List[Dict[str, Any]]):
         """
@@ -177,6 +160,7 @@ class Database:
         cursor = self.conn.cursor()
         timestamp = datetime.now()
         saved_count = 0
+        not_resolved = []
 
         try:
             for data in data_list:
@@ -199,7 +183,7 @@ class Database:
                 )
 
                 if not device_id:
-                    print(f"Could not resolve device ID for {name}. Skipping.")
+                    not_resolved.append(name)
                     continue
 
                 if self.should_update_config(
@@ -270,7 +254,8 @@ class Database:
                 saved_count += 1
             
             self.conn.commit()
-            print(f"Saved data for {saved_count} printers.")
+            print(f"\nSaved data for {saved_count} printers.")
+            print(f"Could not resolve device IDs for {len(not_resolved)} printers.")
             
         except Exception as e:
             self.conn.rollback()

@@ -10,7 +10,7 @@ async def main() -> None:
     printers = get_printers_from_server(Config.PRINT_SERVER_IP)
     
     if not printers:
-        print("No printers found or connection error occurred.")
+        print("No printers found or connection error to printer server occurred.")
         return
     
     ### Fetch printer metrics asynchronously
@@ -19,11 +19,9 @@ async def main() -> None:
         max_concurrent=Config.MAX_CONCURRENT_REQUESTS
     )
     
-    ### Save results to database (with context manager)
+    ### Save results to database
     with Database(Config()) as db:
         db.save_printer_data(all_data)
-        
-    print("\n✓ Pipeline completed successfully.")
 
 if __name__ == "__main__":
     asyncio.run(main())
