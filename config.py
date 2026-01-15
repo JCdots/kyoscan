@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    ### Authentication
+    NETWORK_USER = os.getenv("NETWORK_USER", "DOMAIN\\username")
+    NETWORK_PASSWORD = os.getenv("NETWORK_PASSWORD", "password")
+
     ### Database
     DB_NAME = os.getenv("DB_NAME", "kyoscan")
     DB_HOST = os.getenv("DB_HOST", "localhost")
