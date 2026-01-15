@@ -2,9 +2,9 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 
 handler = TimedRotatingFileHandler(
-    filename='/logs/app_log.txt',
+    filename='./logs/app_log.txt',
     when='midnight',
-    interval=7,
+    interval=1,
     backupCount=30,
     encoding='utf-8'
 )
