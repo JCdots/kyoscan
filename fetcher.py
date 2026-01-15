@@ -1,35 +1,12 @@
 import asyncio
 import httpx
 import win32print
-import wi32wnet
 import re
 from typing import Dict, List, Optional, Any
-from config import Config
 
-def connect_to_server(item: str, user: str, password: str):
-    """
-    Establishes a network connection to a server resource using explicit credentials.
-    Accessing the IPC$ share is the standard way to authenticate to a server.
-    """
-    resource = f"\\\\{item}\\IPC$"
-    try:
-        # WNetAddConnection2(remote_resource, password, username, flags)
-        # flags=0 means temporary connection (doesn't persist after script ends)
-        win32wnet.WNetAddConnection2(
-            {'remote': resource, 'local': ''}, 
-            password, 
-            user, 
-            0
-        )
-        return True
-    except Exception as e:
-        return False
     
 def get_printers_from_server(server_ip: str) -> Optional[Dict[str, Optional[str]]]:
     """Retrieve printers from the print server and extract IPs."""
-    
-    if hasattr(Config, 'NETWORK_USER') and hasattr(Config, 'NETWORK_PASSWORD'):
-        connect_to_server(server_ip, Config.NETWORK_USER, Config.NETWORK_PASSWORD)
     
     printer_dict = {}
     ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
